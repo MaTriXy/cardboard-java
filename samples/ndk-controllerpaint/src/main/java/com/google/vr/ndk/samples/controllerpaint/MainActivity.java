@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Google Inc. All rights reserved.
+ * Copyright 2017 Google Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -30,34 +30,51 @@ import javax.microedition.khronos.egl.EGLConfig;
 import javax.microedition.khronos.opengles.GL10;
 
 /**
- * Main Activity.
+ * A Google VR NDK sample application.
  *
- * <p>This is the main Activity for this demo app. It consists of a GLSurfaceView that is
- * responsible for doing the rendering. We forward all of the interesting events to native code.
+ * <p>This app is a "paint program" that allows the user to paint in virtual space using the
+ * controller. A cursor shows where the controller is pointing at. Touching or clicking the touchpad
+ * begins drawing. Then, as the user moves their hand, lines are drawn. The user can switch the
+ * drawing color by swiping to the right or left on the touchpad. The user can also change the
+ * drawing stroke width by moving their finger up and down on the touchpad.
+ *
+ * <p>This is the main Activity for the sample application. It initializes a GLSurfaceView to allow
+ * rendering, a GvrLayout for GVR API access, and forwards relevant events to the native demo app
+ * instance where rendering and interaction are handled.
  */
 public class MainActivity extends Activity {
   private static final String TAG = "MainActivity";
-  // Opaque native pointer to the DemoApp C++ object.
-  // This object is owned by the MainActivity instance and passed to the native methods.
-  private long nativeControllerPaint;
-
-  // This is done on the GL thread because refreshViewerProfile isn't thread-safe.
-  private final Runnable refreshViewerProfileRunnable =
-      new Runnable() {
-        @Override
-        public void run() {
-          gvrLayout.getGvrApi().refreshViewerProfile();
-        }
-      };
 
   static {
     // Load our JNI code.
     System.loadLibrary("controllerpaint_jni");
   }
 
+  // Opaque native pointer to the DemoApp C++ object.
+  // This object is owned by the MainActivity instance and passed to the native methods.
+  private long nativeControllerPaint;
+
   private GvrLayout gvrLayout;
   private GLSurfaceView surfaceView;
   private AssetManager assetManager;
+
+  // Note that pause and resume signals to the native app are performed on the GL thread, ensuring
+  // thread-safety.
+  private final Runnable pauseNativeRunnable =
+      new Runnable() {
+        @Override
+        public void run() {
+          nativeOnPause(nativeControllerPaint);
+        }
+      };
+
+  private final Runnable resumeNativeRunnable =
+      new Runnable() {
+        @Override
+        public void run() {
+          nativeOnResume(nativeControllerPaint);
+        }
+      };
 
   @Override
   protected void onCreate(Bundle savedInstanceState) {
@@ -82,23 +99,26 @@ public class MainActivity extends Activity {
     // Get the GvrLayout.
     gvrLayout = new GvrLayout(this);
 
-    // Enable scan line racing, if possible.
+    // Enable async reprojection, if possible.
     if (gvrLayout.setAsyncReprojectionEnabled(true)) {
-      Log.d(TAG, "Successfully enabled scanline racing.");
-      // Scanline racing decouples the app framerate from the display framerate,
+      Log.d(TAG, "Successfully enabled async reprojection.");
+      // Async reprojection decouples the app framerate from the display framerate,
       // allowing immersive interaction even at the throttled clockrates set by
       // sustained performance mode.
       AndroidCompat.setSustainedPerformanceMode(this, true);
     } else {
-      Log.w(TAG, "Failed to enable scanline racing.");
+      Log.w(TAG, "Failed to enable async reprojection.");
     }
 
     // Configure the GLSurfaceView.
     surfaceView = new GLSurfaceView(this);
     surfaceView.setEGLContextClientVersion(2);
     surfaceView.setEGLConfigChooser(8, 8, 8, 0, 0, 0);
-    surfaceView.setPreserveEGLContextOnPause(true);
     surfaceView.setRenderer(renderer);
+
+    // Note that we are not setting setPreserveEGLContextOnPause(true) here,
+    // even though it is recommended.  This is done so that we have at least
+    // one demo that provides some testing coverage for no-preserve contexts.
 
     // Set the GLSurfaceView as the GvrLayout's presentation view.
     gvrLayout.setPresentationView(surfaceView);
@@ -128,9 +148,9 @@ public class MainActivity extends Activity {
 
   @Override
   protected void onPause() {
+    surfaceView.queueEvent(pauseNativeRunnable);
     surfaceView.onPause();
     gvrLayout.onPause();
-    nativeOnPause(nativeControllerPaint);
     super.onPause();
   }
 
@@ -139,8 +159,13 @@ public class MainActivity extends Activity {
     super.onResume();
     gvrLayout.onResume();
     surfaceView.onResume();
-    nativeOnResume(nativeControllerPaint);
-    surfaceView.queueEvent(refreshViewerProfileRunnable);
+    surfaceView.queueEvent(resumeNativeRunnable);
+  }
+
+  @Override
+  public void onBackPressed() {
+    super.onBackPressed();
+    gvrLayout.onBackPressed();
   }
 
   @Override
@@ -192,10 +217,10 @@ public class MainActivity extends Activity {
       };
 
   private native long nativeOnCreate(AssetManager assetManager, long gvrContextPtr);
+  private native void nativeOnDestroy(long controllerPaintJptr);
   private native void nativeOnResume(long controllerPaintJptr);
   private native void nativeOnPause(long controllerPaintJptr);
   private native void nativeOnSurfaceCreated(long controllerPaintJptr);
   private native void nativeOnSurfaceChanged(int width, int height, long controllerPaintJptr);
   private native void nativeOnDrawFrame(long controllerPaintJptr);
-  private native void nativeOnDestroy(long controllerPaintJptr);
 }

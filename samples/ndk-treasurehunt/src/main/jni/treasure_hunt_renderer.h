@@ -1,4 +1,4 @@
-/* Copyright 2016 Google Inc. All rights reserved.
+/* Copyright 2017 Google Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -90,14 +90,18 @@ class TreasureHuntRenderer {
    */
   int LoadGLShader(int type, const char** shadercode);
 
+  enum ViewType {
+    kLeftView,
+    kRightView,
+    kMultiview
+  };
+
   /**
-   * Draws all world-space objects for one eye.
+   * Draws all world-space objects for the given view type.
    *
-   * @param view_matrix View transformation for the current eye.
-   * @param viewport The buffer viewport for which we are rendering.
+   * @param view Specifies which view we are rendering.
    */
-  void DrawWorld(const gvr::Mat4f& view_matrix,
-                 const gvr::BufferViewport& viewport);
+  void DrawWorld(ViewType view);
 
   /**
    * Draws the reticle. The reticle is positioned using viewport parameters,
@@ -110,8 +114,10 @@ class TreasureHuntRenderer {
    *
    * We've set all of our transformation matrices. Now we simply pass them
    * into the shader.
+   *
+   * @param view Specifies which eye we are rendering: left, right, or both.
    */
-  void DrawCube();
+  void DrawCube(ViewType view);
 
   /**
    * Draw the floor.
@@ -119,16 +125,10 @@ class TreasureHuntRenderer {
    * This feeds in data for the floor into the shader. Note that this doesn't
    * feed in data about position of the light, so if we rewrite our code to
    * draw the floor first, the lighting might look strange.
-   */
-  void DrawFloor();
-
-  /**
-   * Draws the cursor.
    *
-   * We've set all of our transformation matrices. Now we simply pass them
-   * into the shader.
+   * @param view Specifies which eye we are rendering: left, right, or both.
    */
-  void DrawCursor();
+  void DrawFloor(ViewType view);
 
   /**
    * Find a new random position for the object.
@@ -139,29 +139,20 @@ class TreasureHuntRenderer {
   void HideObject();
 
   /**
-   * Check if user is looking at object by calculating where the object is
-   * in eye-space.
-   *
-   * @return true if the user is looking at the object.
+   * Update the position of the reticle based on controller data.
+   * In Cardboard mode, this function simply sets the position to the center
+   * of the view.
    */
-  bool IsLookingAtObject();
+  void UpdateReticlePosition();
 
   /**
-   * Check if user is pointing at object by calculating where the object is
-   * in eye-space.
+   * Check if user is pointing or looking at the object by calculating whether
+   * the angle between the user's gaze or controller orientation and the vector
+   * pointing towards the object is lower than some threshold.
    *
    * @return true if the user is pointing at the object.
    */
   bool IsPointingAtObject();
-
-  /**
-   * Check if the object has been found. If the viewer is CARDBOARD, it checks
-   * whether the user is looking at the object. If the viewer is DAYDREAM, it
-   * checks whether the user is pointing at the object with a controller.
-   *
-   * @return true if the object is found.
-   */
-  bool ObjectIsFound();
 
   /**
    * Preloads the cube sound sample and starts the spatialized playback at the
@@ -193,7 +184,8 @@ class TreasureHuntRenderer {
   std::unique_ptr<gvr::AudioApi> gvr_audio_api_;
   std::unique_ptr<gvr::BufferViewportList> viewport_list_;
   std::unique_ptr<gvr::SwapChain> swapchain_;
-  gvr::BufferViewport scratch_viewport_;
+  gvr::BufferViewport viewport_left_;
+  gvr::BufferViewport viewport_right_;
 
   std::vector<float> lightpos_;
 
@@ -232,24 +224,30 @@ class TreasureHuntRenderer {
   const gvr::Sizei reticle_render_size_;
 
   const std::array<float, 4> light_pos_world_space_;
-  std::array<float, 4> light_pos_eye_space_;
 
   gvr::Mat4f head_view_;
   gvr::Mat4f model_cube_;
   gvr::Mat4f camera_;
   gvr::Mat4f view_;
-  gvr::Mat4f modelview_projection_cube_;
-  gvr::Mat4f modelview_projection_floor_;
-  gvr::Mat4f modelview_projection_cursor_;
-  gvr::Mat4f modelview_;
   gvr::Mat4f model_floor_;
   gvr::Mat4f model_reticle_;
-  gvr::Mat4f model_cursor_;
+  gvr::Mat4f modelview_reticle_;
   gvr::Sizei render_size_;
+
+  // View-dependent values.  These are stored in length two arrays to allow
+  // syncing with uniforms consumed by the multiview vertex shader.  For
+  // simplicity, we stash valid values in both elements (left, right) of these
+  // arrays even when multiview is disabled.
+  std::array<float, 3> light_pos_eye_space_[2];
+  gvr::Mat4f modelview_projection_cube_[2];
+  gvr::Mat4f modelview_projection_floor_[2];
+  gvr::Mat4f modelview_cube_[2];
+  gvr::Mat4f modelview_floor_[2];
 
   int score_;
   float object_distance_;
   float reticle_distance_;
+  bool multiview_enabled_;
 
   gvr::AudioSourceId audio_source_id_;
 
